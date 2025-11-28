@@ -72,6 +72,11 @@ export const getUsers = async (): Promise<User[]> => {
               googleSheetsClient.post('register', localRoot).catch(console.error);
               return [localRoot];
           }
+
+          // CRITICAL FIX: Aggiorniamo la cache locale con i dati freschi dal cloud
+          // Questo assicura che il fallback sia sempre aggiornato
+          saveLocalUsers(data as User[]);
+
           return data as User[];
       }
       // Se data è null (timeout o errore), fallisce silenziosamente verso il locale
@@ -156,6 +161,17 @@ export const registerUser = async (
           // Errore specifico dal server o timeout
           return { success: false, message: res?.error || 'Errore salvataggio Cloud. Riprova.' };
       }
+      
+      // CRITICAL FIX: Aggiornamento ottimistico della cache locale
+      // Anche se siamo in modalità cloud, salviamo in locale per permettere il login immediato
+      // in caso di latenza del database cloud o fallimento della fetch successiva.
+      const localUsers = getLocalUsers();
+      // Evitiamo duplicati se per qualche motivo esisteva già
+      if (!localUsers.find(u => u.id === newUser.id)) {
+          localUsers.push(newUser);
+          saveLocalUsers(localUsers);
+      }
+
   } else if (DB_MODE === 'SUPABASE' && isDbConfigured()) {
       const { error } = await supabase.from('users').insert([{
           id: newUser.id,
@@ -189,6 +205,15 @@ export const updateUser = async (userId: string, updates: Partial<User>): Promis
       if (target) {
            const merged = { ...target, ...updates };
            updateLocalSession(merged);
+           
+           // Aggiorniamo anche la lista cache generale per coerenza
+           const localUsers = getLocalUsers();
+           const idx = localUsers.findIndex(u => u.id === userId);
+           if (idx !== -1) {
+               localUsers[idx] = { ...localUsers[idx], ...updates };
+               saveLocalUsers(localUsers);
+           }
+           
            return merged;
       }
       return null;
@@ -239,6 +264,15 @@ export const addUtility = async (
       if (currentUser && currentUser.id === userId) {
           const updatedUser = { ...currentUser, utilities: [...(currentUser.utilities || []), newUtility] };
           updateLocalSession(updatedUser);
+          
+          // Sync Local Cache
+          const localUsers = getLocalUsers();
+          const idx = localUsers.findIndex(u => u.id === userId);
+          if (idx !== -1) {
+             localUsers[idx] = updatedUser;
+             saveLocalUsers(localUsers);
+          }
+
           return updatedUser;
       }
       return null;
@@ -303,12 +337,29 @@ export const updateUtilityStatus = async (
 };
 
 export const loginUser = async (username: string, password: string): Promise<User | null> => {
+  // 1. Prova a ottenere utenti aggiornati (dal Cloud se disponibile)
   const users = await getUsers();
   const user = users.find(u => u.username === username && u.password === password);
+  
   if (user) {
     localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
     return user;
   }
+
+  // 2. SAFETY FALLBACK:
+  // Se getUsers ha restituito dati dal Cloud che potrebbero essere "vecchi" (cache di google)
+  // o se c'è stata una desincronizzazione, controlliamo specificamente la cache locale
+  // dove salviamo i nuovi utenti appena registrati.
+  if (DB_MODE === 'GOOGLE_SHEETS') {
+      const localUsers = getLocalUsers();
+      const localUser = localUsers.find(u => u.username === username && u.password === password);
+      if (localUser) {
+          console.warn("User trovato in cache locale (non ancora in cloud sync). Login consentito.");
+          localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(localUser));
+          return localUser;
+      }
+  }
+
   return null;
 };
 
