@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { loginUser, registerUser } from '../services/matrixService';
 import { User } from '../types';
@@ -223,5 +224,8 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
           </button>
         </div>
       </div>
-      
-      <div className
+    </div>
+  );
+};
+
+export default Auth;

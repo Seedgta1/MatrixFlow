@@ -5,7 +5,7 @@ import { buildTree, logoutUser, registerUser, getNetworkStats, addUtility, getRe
 import { analyzeNetwork, extractBillData } from '../services/geminiService';
 import TreeVisualizer from './TreeVisualizer';
 import MatrixBackground from './MatrixBackground';
-import { Activity, Users, GitMerge, LogOut, Cpu, Search, UserPlus, Zap, Flame, PlusCircle, LayoutDashboard, Upload, FileText, Loader2, Paperclip, Link, Copy, Check, Settings, ShieldCheck, User as UserIcon, Mail, Phone, Palette, Dices, Save, Pencil, X, ChevronDown } from 'lucide-react';
+import { Activity, Users, GitMerge, LogOut, Cpu, Search, UserPlus, Zap, Flame, PlusCircle, LayoutDashboard, Upload, FileText, Loader2, Paperclip, Link, Copy, Check, Settings, ShieldCheck, User as UserIcon, Mail, Phone, Palette, Dices, Save, Pencil, X, ChevronDown, RefreshCcw } from 'lucide-react';
 
 interface DashboardProps {
   user: User;
@@ -45,6 +45,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserPhone, setNewUserPhone] = useState('');
   const [addMessage, setAddMessage] = useState('');
+  const [isRegistering, setIsRegistering] = useState(false);
 
   const [utilType, setUtilType] = useState<UtilityType>('Luce');
   const [utilProvider, setUtilProvider] = useState('');
@@ -53,7 +54,10 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
   const [isProcessingFile, setIsProcessingFile] = useState(false);
 
   const [currentUser, setCurrentUser] = useState<User>(user);
-  
+  const [isLoadingData, setIsLoadingData] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [loadingTimer, setLoadingTimer] = useState(0);
+
   // Avatar Editor State
   const [avatarConfig, setAvatarConfig] = useState<AvatarConfig>(user.avatarConfig || { style: 'bottts-neutral', seed: user.username, backgroundColor: 'transparent' });
   const [isSavingAvatar, setIsSavingAvatar] = useState(false);
@@ -64,19 +68,35 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
   const [editPhone, setEditPhone] = useState(user.phone);
   const [contactMessage, setContactMessage] = useState('');
 
-  const refreshData = () => {
-    const tree = buildTree(currentUser.id);
-    setTreeData(tree);
-    setStats(getNetworkStats());
-    setReferralLink(getReferralLink(currentUser.username));
+  // FIX: Async Data Loading to prevent crashes
+  const refreshData = async () => {
+    setLoadError(false);
+    try {
+      const tree = await buildTree(currentUser.id);
+      setTreeData(tree);
+      const networkStats = await getNetworkStats();
+      setStats(networkStats);
+      setReferralLink(getReferralLink(currentUser.username));
+    } catch (e) {
+      console.error("Error refreshing data", e);
+      setLoadError(true);
+    } finally {
+      setIsLoadingData(false);
+    }
   };
 
   useEffect(() => {
     refreshData();
+    // Safety Timer: If loading takes too long (> 8s), show option to logout
+    const timer = setInterval(() => {
+        setLoadingTimer(prev => prev + 1);
+    }, 1000);
+    
     // Sync local edit state if user updates elsewhere
     setEditEmail(currentUser.email);
     setEditPhone(currentUser.phone);
-  }, [currentUser.id, currentUser.utilities, currentUser.avatarConfig, currentUser.email, currentUser.phone]);
+    return () => clearInterval(timer);
+  }, [currentUser.id]);
 
   const handleAiAnalyze = async () => {
     if (!treeData) return;
@@ -87,21 +107,31 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
     setIsAnalyzing(false);
   };
 
-  const handleAddUser = (e: React.FormEvent) => {
+  const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newUserEmail || !newUserPhone) {
         setAddMessage("Email e Telefono sono obbligatori");
         return;
     }
-    const res = registerUser(newUsername, newUserPass, currentUser.username, newUserEmail, newUserPhone);
-    setAddMessage(res.message);
-    if (res.success) {
-      setNewUsername('');
-      setNewUserPass('');
-      setNewUserEmail('');
-      setNewUserPhone('');
-      refreshData();
-      setTimeout(() => setShowAddUser(false), 1500);
+    setIsRegistering(true);
+    setAddMessage(''); // Clear previous
+    try {
+        const res = await registerUser(newUsername, newUserPass, currentUser.username, newUserEmail, newUserPhone);
+        if (res.success) {
+          setAddMessage(res.message);
+          setNewUsername('');
+          setNewUserPass('');
+          setNewUserEmail('');
+          setNewUserPhone('');
+          await refreshData();
+          setTimeout(() => setShowAddUser(false), 1500);
+        } else {
+          setAddMessage(`Errore: ${res.message}`);
+        }
+    } catch (error) {
+        setAddMessage("Errore imprevisto durante la registrazione.");
+    } finally {
+        setIsRegistering(false);
     }
   };
 
@@ -120,47 +150,57 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
 
       const reader = new FileReader();
       reader.onload = async () => {
-        const base64String = (reader.result as string).split(',')[1];
-        const result = await extractBillData(base64String, file.type);
-        
-        if (result.error) {
-           setUtilMessage("Analisi fallita: inserisci i dati manualmente.");
-        } else {
-           if (result.provider) setUtilProvider(result.provider);
-           if (result.type) setUtilType(result.type);
-           setUtilMessage("Dati estratti automaticamente dalla bolletta! Verifica e conferma.");
+        try {
+            const base64String = (reader.result as string).split(',')[1];
+            const result = await extractBillData(base64String, file.type);
+            
+            if (result.error) {
+               setUtilMessage("Analisi fallita: inserisci i dati manualmente.");
+            } else {
+               if (result.provider) setUtilProvider(result.provider);
+               if (result.type) setUtilType(result.type);
+               setUtilMessage("Dati estratti automaticamente dalla bolletta! Verifica e conferma.");
+            }
+        } catch (err) {
+            setUtilMessage("Errore caricamento file.");
+        } finally {
+            setIsProcessingFile(false);
         }
-        setIsProcessingFile(false);
       };
       reader.readAsDataURL(file);
     }
   };
 
-  const handleAddUtility = (e: React.FormEvent) => {
+  const handleAddUtility = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!utilProvider.trim()) return;
 
-    const updatedUser = addUtility(
-        currentUser.id, 
-        utilType, 
-        utilProvider, 
-        selectedFile?.name, 
-        selectedFile?.type
-    );
+    setUtilMessage("Salvataggio in corso...");
+    try {
+        const updatedUser = await addUtility(
+            currentUser.id, 
+            utilType, 
+            utilProvider, 
+            selectedFile?.name, 
+            selectedFile?.type
+        );
 
-    if (updatedUser) {
-        setCurrentUser(updatedUser);
-        setUtilMessage('Utenza inserita con successo!');
-        setUtilProvider('');
-        setSelectedFile(null);
-        setTimeout(() => setUtilMessage(''), 2000);
-    } else {
-        setUtilMessage('Errore inserimento.');
+        if (updatedUser) {
+            setCurrentUser(updatedUser);
+            setUtilMessage('Utenza inserita con successo!');
+            setUtilProvider('');
+            setSelectedFile(null);
+            setTimeout(() => setUtilMessage(''), 2000);
+        } else {
+            setUtilMessage('Errore inserimento (Verifica connessione).');
+        }
+    } catch (e) {
+        setUtilMessage('Errore di rete.');
     }
   };
 
-  const handleStatusChange = (utilityId: string, newStatus: string) => {
-    const updatedUser = updateUtilityStatus(
+  const handleStatusChange = async (utilityId: string, newStatus: string) => {
+    const updatedUser = await updateUtilityStatus(
       currentUser.id,
       utilityId,
       newStatus as Utility['status']
@@ -170,18 +210,18 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
     }
   };
 
-  const handleSaveAvatar = () => {
+  const handleSaveAvatar = async () => {
     setIsSavingAvatar(true);
-    const updated = updateUser(currentUser.id, { avatarConfig });
+    const updated = await updateUser(currentUser.id, { avatarConfig });
     if (updated) {
         setCurrentUser(updated);
     }
     setTimeout(() => setIsSavingAvatar(false), 800);
   };
 
-  const handleUpdateContact = (e: React.FormEvent) => {
+  const handleUpdateContact = async (e: React.FormEvent) => {
     e.preventDefault();
-    const updated = updateUser(currentUser.id, { email: editEmail, phone: editPhone });
+    const updated = await updateUser(currentUser.id, { email: editEmail, phone: editPhone });
     if (updated) {
       setCurrentUser(updated);
       setContactMessage('Contatti aggiornati!');
@@ -206,6 +246,32 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
   };
 
   const currentAvatarUrl = getAvatarUrl(currentUser.avatarConfig || { style: 'bottts-neutral', seed: currentUser.username, backgroundColor: 'transparent' });
+
+  if (isLoadingData) {
+      return (
+          <div className="min-h-screen bg-[#020617] flex items-center justify-center text-white relative">
+              <div className="flex flex-col items-center gap-6 p-8 glass-card rounded-2xl">
+                  <Loader2 className="w-10 h-10 animate-spin text-indigo-500" />
+                  <div className="text-center">
+                    <p className="text-sm font-bold text-white mb-1">Connessione Matrix in corso...</p>
+                    <p className="text-xs text-slate-500">Sincronizzazione dati cloud</p>
+                  </div>
+                  
+                  {loadingTimer > 8 && (
+                      <div className="animate-enter flex flex-col items-center gap-2 mt-2">
+                        <p className="text-xs text-red-400">La connessione è lenta.</p>
+                        <button 
+                            onClick={() => { logoutUser(); onLogout(); }}
+                            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-2"
+                        >
+                            <LogOut className="w-3 h-3" /> Annulla e Esci
+                        </button>
+                      </div>
+                  )}
+              </div>
+          </div>
+      );
+  }
 
   return (
     <div className="min-h-screen bg-[#020617] relative overflow-hidden text-slate-200">
@@ -370,8 +436,10 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
                             <input type="email" placeholder="Email" required value={newUserEmail} onChange={e => setNewUserEmail(e.target.value)} className="bg-slate-900/50 border border-slate-700 rounded-lg px-4 py-2 text-white" />
                             <input type="tel" placeholder="Telefono" required value={newUserPhone} onChange={e => setNewUserPhone(e.target.value)} className="bg-slate-900/50 border border-slate-700 rounded-lg px-4 py-2 text-white" />
                             <div className="md:col-span-2">
-                                <button type="submit" className="px-6 py-2 bg-white text-slate-900 font-bold rounded-lg hover:bg-slate-200 transition-colors">Registra</button>
-                                {addMessage && <span className="ml-4 text-sm text-indigo-300">{addMessage}</span>}
+                                <button type="submit" disabled={isRegistering} className="px-6 py-2 bg-white text-slate-900 font-bold rounded-lg hover:bg-slate-200 transition-colors flex items-center gap-2">
+                                    {isRegistering && <Loader2 className="w-4 h-4 animate-spin"/>} Registra
+                                </button>
+                                {addMessage && <span className={`ml-4 text-sm font-medium ${addMessage.startsWith('Errore') ? 'text-red-400' : 'text-emerald-400'}`}>{addMessage}</span>}
                             </div>
                         </form>
                     </div>
@@ -383,7 +451,8 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
                 </div>
              </div>
           )}
-
+          
+          {/* ... (Other tabs remain the same) ... */}
           {activeTab === 'utilities' && (
               <div className="animate-enter max-w-4xl mx-auto space-y-6">
                  {/* Add Utility */}
