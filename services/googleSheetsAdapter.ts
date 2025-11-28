@@ -14,7 +14,10 @@ export const googleSheetsClient = {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
-    const query = new URLSearchParams({ action, ...params }).toString();
+    // Add cache busting timestamp
+    const queryParams = { ...params, action, _: Date.now().toString() };
+    const query = new URLSearchParams(queryParams).toString();
+
     try {
         const response = await fetch(`${GOOGLE_SCRIPT_URL}?${query}`, {
             method: 'GET',

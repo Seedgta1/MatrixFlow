@@ -73,11 +73,31 @@ export const getUsers = async (): Promise<User[]> => {
               return [localRoot];
           }
 
-          // CRITICAL FIX: Aggiorniamo la cache locale con i dati freschi dal cloud
-          // Questo assicura che il fallback sia sempre aggiornato
-          saveLocalUsers(data as User[]);
+          // SMART MERGE:
+          // Se la lista dal cloud è "vecchia" (causa latenza GS) e manca un utente appena registrato localmente,
+          // il semplice saveLocalUsers sovrascriverebbe l'utente locale facendolo sparire.
+          // Soluzione: Manteniamo gli utenti locali creati di recente (< 10 min) anche se non sono nel cloud.
+          const currentLocal = getLocalUsers();
+          const cloudIds = new Set((data as User[]).map(u => u.id));
+          const now = Date.now();
+          const RECENT_THRESHOLD = 10 * 60 * 1000; // 10 minuti
 
-          return data as User[];
+          const pendingUsers = currentLocal.filter(u => {
+              // Se l'utente è in locale ma NON nel cloud
+              if (!cloudIds.has(u.id)) {
+                  // Controlla se è recente
+                  const joinTime = new Date(u.joinedAt).getTime();
+                  if (!isNaN(joinTime) && (now - joinTime) < RECENT_THRESHOLD) {
+                      return true; // Mantienilo (è probabile che sia un optimistic update non ancora sincronizzato)
+                  }
+              }
+              return false;
+          });
+
+          const mergedData = [...(data as User[]), ...pendingUsers];
+          
+          saveLocalUsers(mergedData);
+          return mergedData;
       }
       // Se data è null (timeout o errore), fallisce silenziosamente verso il locale
       console.warn("Cloud non disponibile, uso dati locali.");
@@ -157,12 +177,8 @@ export const registerUser = async (
 
   if (DB_MODE === 'GOOGLE_SHEETS' && isGsConfigured()) {
       const res = await googleSheetsClient.post('register', newUser);
-      if (!res || res.error) {
-          // Errore specifico dal server o timeout
-          return { success: false, message: res?.error || 'Errore salvataggio Cloud. Riprova.' };
-      }
       
-      // CRITICAL FIX: Aggiornamento ottimistico della cache locale
+      // CRITICAL FIX: Aggiornamento ottimistico della cache locale PRIMA di ritornare
       // Anche se siamo in modalità cloud, salviamo in locale per permettere il login immediato
       // in caso di latenza del database cloud o fallimento della fetch successiva.
       const localUsers = getLocalUsers();
@@ -172,6 +188,11 @@ export const registerUser = async (
           saveLocalUsers(localUsers);
       }
 
+      if (!res || res.error) {
+          // Errore specifico dal server o timeout
+          return { success: false, message: res?.error || 'Errore salvataggio Cloud. Riprova.' };
+      }
+      
   } else if (DB_MODE === 'SUPABASE' && isDbConfigured()) {
       const { error } = await supabase.from('users').insert([{
           id: newUser.id,
