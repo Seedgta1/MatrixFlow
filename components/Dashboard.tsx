@@ -5,7 +5,7 @@ import { buildTree, logoutUser, registerUser, getNetworkStats, addUtility, getRe
 import { analyzeNetwork, extractBillData } from '../services/geminiService';
 import TreeVisualizer from './TreeVisualizer';
 import MatrixBackground from './MatrixBackground';
-import { Activity, Users, GitMerge, LogOut, Cpu, Search, UserPlus, Zap, Flame, PlusCircle, LayoutDashboard, Upload, FileText, Loader2, Paperclip, Link, Copy, Check, Settings, ShieldCheck, User as UserIcon, Mail, Phone, Palette, Dices, Save, Pencil, X, ChevronDown, RefreshCcw, Cloud, CloudOff } from 'lucide-react';
+import { Activity, Users, GitMerge, LogOut, Cpu, Search, UserPlus, Zap, Flame, PlusCircle, LayoutDashboard, Upload, FileText, Loader2, Paperclip, Link, Copy, Check, Settings, ShieldCheck, User as UserIcon, Mail, Phone, Palette, Dices, Save, Pencil, X, ChevronDown, RefreshCcw, Cloud, CloudOff, AlertTriangle, Trash2 } from 'lucide-react';
 
 interface DashboardProps {
   user: User;
@@ -69,15 +69,11 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
   const [editPhone, setEditPhone] = useState(user.phone);
   const [contactMessage, setContactMessage] = useState('');
 
-  // FIX: Async Data Loading to prevent crashes
   const refreshData = async () => {
     setLoadError(false);
     try {
-      // Check if we got data from cloud or local fallback logic
       const tree = await buildTree(currentUser.id);
       
-      // Determine connectivity status roughly by checking if tree has data and no error thrown
-      // Ideally matrixService would expose a status, but for now we infer:
       setCloudStatus('connected'); 
       
       setTreeData(tree);
@@ -95,12 +91,10 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
 
   useEffect(() => {
     refreshData();
-    // Safety Timer: If loading takes too long (> 8s), show option to logout
     const timer = setInterval(() => {
         setLoadingTimer(prev => prev + 1);
     }, 1000);
     
-    // Sync local edit state if user updates elsewhere
     setEditEmail(currentUser.email);
     setEditPhone(currentUser.phone);
     return () => clearInterval(timer);
@@ -122,7 +116,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
         return;
     }
     setIsRegistering(true);
-    setAddMessage(''); // Clear previous
+    setAddMessage(''); 
     try {
         const res = await registerUser(newUsername, newUserPass, currentUser.username, newUserEmail, newUserPhone);
         if (res.success) {
@@ -135,7 +129,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
           setTimeout(() => setShowAddUser(false), 1500);
         } else {
           setAddMessage(`Errore: ${res.message}`);
-          setCloudStatus('offline'); // If it failed, likely offline/error
+          setCloudStatus('offline'); 
         }
     } catch (error) {
         setAddMessage("Errore imprevisto durante la registrazione.");
@@ -243,6 +237,13 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
     }
   };
 
+  const handleHardReset = () => {
+    if(confirm("Attenzione: questo cancellerà i dati locali e ti disconnetterà. Utile se l'app è bloccata. Continuare?")) {
+        localStorage.clear();
+        window.location.reload();
+    }
+  };
+
   const randomizeAvatar = () => {
     setAvatarConfig(prev => ({
         ...prev,
@@ -267,14 +268,22 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
                   </div>
                   
                   {loadingTimer > 8 && (
-                      <div className="animate-enter flex flex-col items-center gap-2 mt-2">
-                        <p className="text-xs text-red-400">La connessione è lenta.</p>
-                        <button 
-                            onClick={() => { logoutUser(); onLogout(); }}
-                            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-2"
-                        >
-                            <LogOut className="w-3 h-3" /> Annulla e Esci
-                        </button>
+                      <div className="animate-enter flex flex-col items-center gap-3 mt-2">
+                        <p className="text-xs text-amber-400">Rilevata latenza elevata.</p>
+                        <div className="flex gap-2">
+                            <button 
+                                onClick={() => { logoutUser(); onLogout(); }}
+                                className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-2"
+                            >
+                                <LogOut className="w-3 h-3" /> Logout
+                            </button>
+                            <button 
+                                onClick={handleHardReset}
+                                className="px-3 py-2 bg-red-900/50 hover:bg-red-800 text-red-200 text-xs font-bold rounded-lg transition-colors flex items-center gap-2"
+                            >
+                                <Trash2 className="w-3 h-3" /> Reset App
+                            </button>
+                        </div>
                       </div>
                   )}
               </div>
@@ -293,15 +302,19 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
          <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 pointer-events-none"></div>
       </div>
 
-      <div className="relative z-10 pb-36 md:pb-8"> {/* Increased bottom padding for floating dock */}
+      <div className="relative z-10 pb-36 md:pb-8"> 
         
         {/* Navbar */}
         <nav className="border-b border-white/5 bg-slate-900/60 sticky top-0 z-40 backdrop-blur-xl safe-area-top">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between h-16">
               <div className="flex items-center gap-3">
-                {/* Small Animated Logo */}
-                <div className="w-10 h-10 relative">
+                {/* Small Animated Logo - Clickable to Home */}
+                <button 
+                   onClick={() => setActiveTab('network')}
+                   className="w-10 h-10 relative cursor-pointer hover:scale-105 transition-transform"
+                   title="Home Network"
+                >
                    <svg viewBox="0 0 100 100" className="w-full h-full drop-shadow-[0_0_8px_rgba(99,102,241,0.6)]">
                       <defs>
                         <linearGradient id="logoNavGrad" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -316,7 +329,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
                         <circle cx="50" cy="50" r="10" fill="url(#logoNavGrad)" className="animate-pulse" />
                       </g>
                    </svg>
-                </div>
+                </button>
                 {/* Hide Text on small mobile to save space */}
                 <span className="hidden sm:block text-lg md:text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">
                   MatrixFlow
@@ -642,7 +655,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
                                    <label className="text-xs text-slate-500 uppercase font-bold mb-1 block">Email</label>
                                    <div className="flex gap-2">
                                        <div className="relative flex-1">
-                                           <Mail className="absolute left-3 top-3 w-4 h-4 text-slate-500" />
+                                            <Mail className="absolute left-3 top-3 w-4 h-4 text-slate-500" />
                                            <input 
                                               type="email" 
                                               value={editEmail} 
