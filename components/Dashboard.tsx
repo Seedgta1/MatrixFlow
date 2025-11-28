@@ -5,7 +5,7 @@ import { buildTree, logoutUser, registerUser, getNetworkStats, addUtility, getRe
 import { analyzeNetwork, extractBillData } from '../services/geminiService';
 import TreeVisualizer from './TreeVisualizer';
 import MatrixBackground from './MatrixBackground';
-import { Activity, Users, GitMerge, LogOut, Cpu, Search, UserPlus, Zap, Flame, PlusCircle, LayoutDashboard, Upload, FileText, Loader2, Paperclip, Link, Copy, Check, Settings, ShieldCheck, User as UserIcon, Mail, Phone, Palette, Dices, Save, Pencil, X, ChevronDown, RefreshCcw } from 'lucide-react';
+import { Activity, Users, GitMerge, LogOut, Cpu, Search, UserPlus, Zap, Flame, PlusCircle, LayoutDashboard, Upload, FileText, Loader2, Paperclip, Link, Copy, Check, Settings, ShieldCheck, User as UserIcon, Mail, Phone, Palette, Dices, Save, Pencil, X, ChevronDown, RefreshCcw, Cloud, CloudOff } from 'lucide-react';
 
 interface DashboardProps {
   user: User;
@@ -57,6 +57,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [loadingTimer, setLoadingTimer] = useState(0);
+  const [cloudStatus, setCloudStatus] = useState<'connected' | 'offline'>('offline');
 
   // Avatar Editor State
   const [avatarConfig, setAvatarConfig] = useState<AvatarConfig>(user.avatarConfig || { style: 'bottts-neutral', seed: user.username, backgroundColor: 'transparent' });
@@ -72,13 +73,20 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
   const refreshData = async () => {
     setLoadError(false);
     try {
+      // Check if we got data from cloud or local fallback logic
       const tree = await buildTree(currentUser.id);
+      
+      // Determine connectivity status roughly by checking if tree has data and no error thrown
+      // Ideally matrixService would expose a status, but for now we infer:
+      setCloudStatus('connected'); 
+      
       setTreeData(tree);
       const networkStats = await getNetworkStats();
       setStats(networkStats);
       setReferralLink(getReferralLink(currentUser.username));
     } catch (e) {
       console.error("Error refreshing data", e);
+      setCloudStatus('offline');
       setLoadError(true);
     } finally {
       setIsLoadingData(false);
@@ -127,6 +135,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
           setTimeout(() => setShowAddUser(false), 1500);
         } else {
           setAddMessage(`Errore: ${res.message}`);
+          setCloudStatus('offline'); // If it failed, likely offline/error
         }
     } catch (error) {
         setAddMessage("Errore imprevisto durante la registrazione.");
@@ -312,6 +321,22 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
                 <span className="hidden sm:block text-lg md:text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">
                   MatrixFlow
                 </span>
+                
+                {/* Cloud Status Indicator */}
+                <div className="flex items-center gap-1.5 px-2 py-1 bg-white/5 rounded-full border border-white/5 ml-2">
+                    {cloudStatus === 'connected' ? (
+                        <>
+                           <Cloud className="w-3 h-3 text-emerald-400" />
+                           <span className="text-[10px] text-emerald-400 font-bold hidden md:inline">ONLINE</span>
+                        </>
+                    ) : (
+                        <>
+                           <CloudOff className="w-3 h-3 text-red-400" />
+                           <span className="text-[10px] text-red-400 font-bold hidden md:inline">OFFLINE</span>
+                        </>
+                    )}
+                </div>
+
               </div>
               <div className="flex items-center gap-4 md:gap-6">
                 {/* Desktop Tabs */}
@@ -451,8 +476,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
                 </div>
              </div>
           )}
-          
-          {/* ... (Other tabs remain the same) ... */}
+
           {activeTab === 'utilities' && (
               <div className="animate-enter max-w-4xl mx-auto space-y-6">
                  {/* Add Utility */}

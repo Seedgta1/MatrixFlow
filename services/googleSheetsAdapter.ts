@@ -30,17 +30,20 @@ export const googleSheetsClient = {
             // Controllo errori applicativi restituiti dallo script
             if (json.error) {
                 console.error("GS Script Error:", json.error);
+                if (json.error.includes("getSheetByName")) {
+                    console.warn("Lo script non trova i fogli. Assicurati di usare .openById() nello script.");
+                }
                 return null;
             }
             return json;
         } catch(e) {
-            console.error("Google Sheets ha restituito un errore non JSON (es. HTML error page):", text.substring(0, 100));
+            console.error("Google Sheets ha restituito un errore non JSON:", text.substring(0, 100));
             return null;
         }
     } catch (e: any) {
         clearTimeout(timeoutId);
         if (e.name === 'AbortError') {
-            console.warn("Google Sheets Timeout: Risposta troppo lenta (>5s). Passaggio a Offline.");
+            console.warn("Google Sheets Timeout (>5s). Passaggio a Offline.");
         } else {
             console.error("GS Get Network Error", e);
         }
@@ -67,10 +70,17 @@ export const googleSheetsClient = {
         
         const text = await response.text();
         try {
-             return JSON.parse(text);
+             const json = JSON.parse(text);
+             if (json.error) {
+                 if (json.error.includes("getSheetByName")) {
+                     return { success: false, error: "Errore Script: Fogli non trovati. Aggiorna lo script con openById." };
+                 }
+                 return { success: false, error: "Errore Cloud: " + json.error };
+             }
+             return json;
         } catch(e) {
              console.error("Google Sheets POST errore parsing:", text.substring(0, 100));
-             return { success: false, error: "Risposta Server non valida (HTML)" };
+             return { success: false, error: "Risposta Server non valida (HTML/Error)" };
         }
     } catch (e: any) {
         clearTimeout(timeoutId);
