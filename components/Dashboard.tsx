@@ -823,6 +823,101 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
               </div>
           )}
 
+          {activeTab === 'settings' && (
+              <div className="animate-enter max-w-2xl mx-auto space-y-6">
+                  {/* Profile & Avatar */}
+                  <div className="glass-card p-6 rounded-2xl border border-white/5">
+                      <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                          <UserIcon className="w-6 h-6 text-indigo-400" /> Profilo & Avatar
+                      </h2>
+
+                      <div className="flex flex-col items-center mb-6">
+                          <div className="relative group cursor-pointer" onClick={randomizeAvatar}>
+                             <div className="w-24 h-24 rounded-full bg-slate-800 border-2 border-indigo-500 overflow-hidden mb-3 shadow-[0_0_20px_rgba(99,102,241,0.3)]">
+                                 <img src={currentAvatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                             </div>
+                             <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                 <Dices className="w-8 h-8 text-white" />
+                             </div>
+                          </div>
+                          
+                          <div className="flex gap-2 mb-4 overflow-x-auto w-full justify-center pb-2">
+                              {AVATAR_STYLES.map(style => (
+                                  <button
+                                      key={style.id}
+                                      onClick={() => setAvatarConfig({...avatarConfig, style: style.id})}
+                                      className={`px-3 py-1 rounded-full text-xs font-bold border transition-colors ${avatarConfig.style === style.id ? 'bg-indigo-600 border-indigo-500 text-white' : 'border-slate-700 text-slate-400 hover:border-slate-500'}`}
+                                  >
+                                      {style.name}
+                                  </button>
+                              ))}
+                          </div>
+                          
+                          <button 
+                             onClick={handleSaveAvatar} 
+                             disabled={isSavingAvatar}
+                             className="px-4 py-2 bg-white text-black text-sm font-bold rounded-lg hover:bg-slate-200 transition-colors flex items-center gap-2"
+                          >
+                             {isSavingAvatar ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                             Salva Avatar
+                          </button>
+                      </div>
+                  </div>
+
+                  {/* Contacts */}
+                  <div className="glass-card p-6 rounded-2xl border border-white/5">
+                      <div className="flex justify-between items-center mb-4">
+                          <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                              <Mail className="w-5 h-5 text-purple-400" /> Contatti
+                          </h3>
+                          <button onClick={() => setIsEditingContact(!isEditingContact)} className="text-xs text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1">
+                              <Pencil className="w-3 h-3" /> Modifica
+                          </button>
+                      </div>
+
+                      {isEditingContact ? (
+                          <form onSubmit={handleUpdateContact} className="space-y-4">
+                              <div>
+                                  <label className="text-xs text-slate-500 uppercase font-bold">Email</label>
+                                  <input type="email" value={editEmail} onChange={e => setEditEmail(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white mt-1" />
+                              </div>
+                              <div>
+                                  <label className="text-xs text-slate-500 uppercase font-bold">Telefono</label>
+                                  <input type="tel" value={editPhone} onChange={e => setEditPhone(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white mt-1" />
+                              </div>
+                              <div className="flex gap-2">
+                                  <button type="submit" className="flex-1 bg-indigo-600 text-white py-2 rounded-lg font-bold text-sm">Salva</button>
+                                  <button type="button" onClick={() => setIsEditingContact(false)} className="flex-1 bg-slate-800 text-slate-400 py-2 rounded-lg font-bold text-sm">Annulla</button>
+                              </div>
+                          </form>
+                      ) : (
+                          <div className="space-y-3">
+                              <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg border border-white/5">
+                                  <span className="text-sm text-slate-400">Email</span>
+                                  <span className="text-sm text-white font-mono">{currentUser.email}</span>
+                              </div>
+                              <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg border border-white/5">
+                                  <span className="text-sm text-slate-400">Telefono</span>
+                                  <span className="text-sm text-white font-mono">{currentUser.phone}</span>
+                              </div>
+                          </div>
+                      )}
+                      {contactMessage && <div className="mt-3 text-center text-xs text-emerald-400 font-bold">{contactMessage}</div>}
+                  </div>
+
+                  {/* Danger Zone */}
+                  <div className="glass-card p-6 rounded-2xl border border-red-900/30 bg-red-950/10">
+                      <h3 className="text-lg font-bold text-red-400 mb-4 flex items-center gap-2">
+                          <AlertTriangle className="w-5 h-5" /> Zona Pericolo
+                      </h3>
+                      <p className="text-xs text-slate-400 mb-4">Se l'applicazione non risponde o i dati sembrano corrotti, puoi forzare un reset locale. Questo ti disconnetterà.</p>
+                      <button onClick={handleHardReset} className="w-full py-3 bg-red-900/50 hover:bg-red-800 text-red-200 font-bold rounded-lg transition-colors border border-red-700/50 flex items-center justify-center gap-2">
+                          <Trash2 className="w-4 h-4" /> Reset Applicazione
+                      </button>
+                  </div>
+              </div>
+          )}
+
           {/* Utility Viewer Modal */}
           {viewingUtility && (
               <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-enter">
@@ -856,6 +951,53 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
           )}
 
         </main>
+        
+        {/* Mobile Bottom Navigation */}
+        <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-black/90 backdrop-blur-xl border-t border-white/10 safe-area-bottom">
+            <div className="flex justify-around items-center h-16 px-2">
+                <button 
+                    onClick={() => setActiveTab('network')}
+                    className={`flex flex-col items-center justify-center w-full h-full gap-1 ${activeTab === 'network' ? 'text-indigo-400' : 'text-slate-500 hover:text-slate-300'}`}
+                >
+                    <div className={`p-1 rounded-full ${activeTab === 'network' ? 'bg-indigo-500/20' : ''}`}>
+                        <LayoutDashboard className="w-5 h-5" />
+                    </div>
+                    <span className="text-[10px] font-medium">Network</span>
+                </button>
+
+                <button 
+                    onClick={() => setActiveTab('utilities')}
+                    className={`flex flex-col items-center justify-center w-full h-full gap-1 ${activeTab === 'utilities' ? 'text-indigo-400' : 'text-slate-500 hover:text-slate-300'}`}
+                >
+                     <div className={`p-1 rounded-full ${activeTab === 'utilities' ? 'bg-indigo-500/20' : ''}`}>
+                        <FileText className="w-5 h-5" />
+                    </div>
+                    <span className="text-[10px] font-medium">Utenze</span>
+                </button>
+
+                {currentUser.username === 'admin' && (
+                    <button 
+                        onClick={() => setActiveTab('admin')}
+                        className={`flex flex-col items-center justify-center w-full h-full gap-1 ${activeTab === 'admin' ? 'text-red-400' : 'text-slate-500 hover:text-slate-300'}`}
+                    >
+                         <div className={`p-1 rounded-full ${activeTab === 'admin' ? 'bg-red-500/20' : ''}`}>
+                            <Shield className="w-5 h-5" />
+                        </div>
+                        <span className="text-[10px] font-medium">Admin</span>
+                    </button>
+                )}
+
+                <button 
+                    onClick={() => setActiveTab('settings')}
+                    className={`flex flex-col items-center justify-center w-full h-full gap-1 ${activeTab === 'settings' ? 'text-indigo-400' : 'text-slate-500 hover:text-slate-300'}`}
+                >
+                     <div className={`p-1 rounded-full ${activeTab === 'settings' ? 'bg-indigo-500/20' : ''}`}>
+                        <Settings className="w-5 h-5" />
+                    </div>
+                    <span className="text-[10px] font-medium">Opzioni</span>
+                </button>
+            </div>
+        </div>
       </div>
     </div>
   );
