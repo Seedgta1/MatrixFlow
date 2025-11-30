@@ -379,6 +379,7 @@ export const updateUtilityStatus = async (
             updateLocalSession(updatedUser);
             
             if (DB_MODE === 'GOOGLE_SHEETS' && isGsConfigured()) {
+                 // Ora usiamo l'endpoint specifico
                  googleSheetsClient.post('updateUtilityStatus', { 
                      userId, 
                      utilityId, 
@@ -419,11 +420,18 @@ export const adminUpdateUtilityStatus = async (
 
   if (DB_MODE === 'GOOGLE_SHEETS' && isGsConfigured()) {
       try {
-          await googleSheetsClient.post('updateUtilityStatus', { 
+           // Richiamiamo l'endpoint dedicato che il nuovo script supporterà
+          const response = await googleSheetsClient.post('updateUtilityStatus', { 
                userId: targetUserId, 
                utilityId, 
                status: newStatus 
            });
+           
+           if (response && response.error) {
+               console.error("Cloud Error updating status:", response.error);
+               return false;
+           }
+           
            return true;
       } catch (err) {
           console.error("Failed to sync utility status (Admin)", err);
