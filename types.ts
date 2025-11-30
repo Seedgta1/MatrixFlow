@@ -9,6 +9,7 @@ export interface Utility {
   status: 'Attiva' | 'In Lavorazione' | 'Rifiutata';
   attachmentName?: string; // Name of the uploaded file
   attachmentType?: string; // MIME type (pdf/image)
+  attachmentData?: string; // Base64 content for preview
 }
 
 export interface AvatarConfig {

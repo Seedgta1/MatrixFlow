@@ -8,6 +8,111 @@
     <title>MatrixFlow 10x10</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+      body {
+        font-family: 'Inter', sans-serif;
+        background-color: #000000;
+        color: #e2e8f0;
+        overflow-x: hidden;
+        -webkit-tap-highlight-color: transparent;
+      }
+      
+      /* Mobile Safe Areas */
+      .safe-area-bottom {
+        padding-bottom: env(safe-area-inset-bottom, 20px);
+      }
+      .safe-area-top {
+        padding-top: env(safe-area-inset-top, 0px);
+      }
+
+      /* Custom scrollbar for glass effect panels */
+      ::-webkit-scrollbar {
+        width: 4px; /* Thinner on mobile */
+        height: 4px;
+      }
+      ::-webkit-scrollbar-track {
+        background: rgba(255, 255, 255, 0.02);
+      }
+      ::-webkit-scrollbar-thumb {
+        background: rgba(99, 102, 241, 0.4);
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: rgba(99, 102, 241, 0.7);
+      }
+
+      /* Animations */
+      @keyframes float {
+        0%, 100% { transform: translateY(0px); }
+        50% { transform: translateY(-10px); }
+      }
+      .animate-float {
+        animation: float 6s ease-in-out infinite;
+      }
+      
+      @keyframes pulse-soft {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.7; }
+      }
+      
+      @keyframes enter-up {
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      .animate-enter {
+        animation: enter-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      }
+      
+      @keyframes slide-in-right {
+        from { transform: translateX(100%); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
+      }
+      .animate-slide-in-right {
+        animation: slide-in-right 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      }
+
+      /* Node Hover Effects */
+      @keyframes pulse-ring-glow {
+        0% { stroke-width: 2px; filter: drop-shadow(0 0 0px transparent); stroke-opacity: 0.8; }
+        50% { stroke-width: 4px; filter: drop-shadow(0 0 8px currentColor); stroke-opacity: 1; }
+        100% { stroke-width: 2px; filter: drop-shadow(0 0 0px transparent); stroke-opacity: 0.8; }
+      }
+      .animate-pulse-ring {
+        animation: pulse-ring-glow 1.5s infinite;
+      }
+
+      /* Logo Animations */
+      @keyframes spin-slow {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
+      .animate-spin-slow {
+        animation: spin-slow 12s linear infinite;
+      }
+
+      @keyframes spin-reverse-slow {
+        from { transform: rotate(360deg); }
+        to { transform: rotate(0deg); }
+      }
+      .animate-spin-reverse-slow {
+        animation: spin-reverse-slow 15s linear infinite;
+      }
+      
+      /* Glass Utilities - Updated for Black Theme */
+      .glass-panel {
+        background: rgba(10, 10, 10, 0.7);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+      }
+      
+      .glass-card {
+        background: linear-gradient(145deg, rgba(20, 20, 20, 0.9), rgba(0, 0, 0, 0.8));
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        box-shadow: 0 4px 30px rgba(0, 0, 0, 0.3);
+      }
+    </style>
   <script type="importmap">
 {
   "imports": {

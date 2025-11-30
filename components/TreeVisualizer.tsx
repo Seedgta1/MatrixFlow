@@ -339,7 +339,7 @@ const TreeVisualizer: React.FC<TreeProps> = ({ data }) => {
   };
 
   return (
-    <div ref={wrapperRef} className="w-full h-full bg-[#0B1120] rounded-xl border border-white/5 shadow-2xl relative overflow-hidden group animate-enter">
+    <div ref={wrapperRef} className="w-full h-full bg-black rounded-xl border border-white/5 shadow-2xl relative overflow-hidden group animate-enter">
       
       {/* Background Grid Pattern */}
       <div className="absolute inset-0 opacity-10 pointer-events-none" 
@@ -455,7 +455,7 @@ const TreeVisualizer: React.FC<TreeProps> = ({ data }) => {
                     <X className="w-5 h-5" />
                 </button>
                 
-                <div className="absolute -bottom-8 border-4 border-[#0B1120] rounded-full bg-[#0B1120]">
+                <div className="absolute -bottom-8 border-4 border-black rounded-full bg-black">
                    <img 
                       src={getAvatarUrl(selectedNode)}
                       alt="avatar"

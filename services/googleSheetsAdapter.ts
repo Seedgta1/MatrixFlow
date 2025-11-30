@@ -3,7 +3,7 @@
 // URL fornito dall'utente per il database online
 export const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby47789n0WFIM4PhzI0HHBArPPQMZJxF7V0xucbheQlXF7hW7qjqsqQbMF27WPZSuxo/exec';
 
-const TIMEOUT_MS = 5000; // 5 Secondi massimo di attesa
+const TIMEOUT_MS = 8000; // Increased timeout for slower Vercel/GS connections
 
 export const googleSheetsClient = {
   async get(action: string, params: any = {}) {
@@ -21,6 +21,7 @@ export const googleSheetsClient = {
     try {
         const response = await fetch(`${GOOGLE_SCRIPT_URL}?${query}`, {
             method: 'GET',
+            mode: 'cors', // Explicit CORS mode
             redirect: 'follow', // Importante per gli script Google
             signal: controller.signal
         });
@@ -46,7 +47,7 @@ export const googleSheetsClient = {
     } catch (e: any) {
         clearTimeout(timeoutId);
         if (e.name === 'AbortError') {
-            console.warn("Google Sheets Timeout (>5s). Passaggio a Offline.");
+            console.warn("Google Sheets Timeout (>8s). Passaggio a Offline.");
         } else {
             console.error("GS Get Network Error", e);
         }
@@ -63,6 +64,7 @@ export const googleSheetsClient = {
     try {
         const response = await fetch(`${GOOGLE_SCRIPT_URL}?action=${action}`, {
             method: 'POST',
+            mode: 'cors', // Explicit CORS mode
             body: JSON.stringify(data),
             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
             redirect: 'follow',
@@ -88,7 +90,7 @@ export const googleSheetsClient = {
     } catch (e: any) {
         clearTimeout(timeoutId);
         if (e.name === 'AbortError') {
-             return { success: false, error: "Timeout connessione server (>5s)." };
+             return { success: false, error: "Timeout connessione server (>8s)." };
         }
         console.error("GS Post Error", e);
         return { success: false, error: "Errore di connessione." };

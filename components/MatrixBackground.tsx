@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef } from 'react';
 
 const MatrixBackground: React.FC = () => {
@@ -48,8 +47,8 @@ const MatrixBackground: React.FC = () => {
 
     const draw = () => {
       // Semi-transparent black to create trail effect
-      // Matches app bg color #020617
-      ctx.fillStyle = 'rgba(2, 6, 23, 0.08)'; 
+      // Matches app bg color #000000
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.08)'; 
       ctx.fillRect(0, 0, width, height);
 
       ctx.font = `${fontSize}px monospace`;
