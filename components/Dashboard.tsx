@@ -1,11 +1,11 @@
 
 import React, { useEffect, useState } from 'react';
 import { User, MatrixNode, UtilityType, AvatarConfig, Utility } from '../types';
-import { buildTree, logoutUser, registerUser, getNetworkStats, addUtility, getReferralLink, updateUser, updateUtilityStatus } from '../services/matrixService';
+import { buildTree, logoutUser, registerUser, getNetworkStats, addUtility, getReferralLink, updateUser, updateUtilityStatus, getUsers, adminUpdateUtilityStatus } from '../services/matrixService';
 import { analyzeNetwork, extractBillData } from '../services/geminiService';
 import TreeVisualizer from './TreeVisualizer';
 import MatrixBackground from './MatrixBackground';
-import { Activity, Users, GitMerge, LogOut, Cpu, Search, UserPlus, Zap, Flame, PlusCircle, LayoutDashboard, Upload, FileText, Loader2, Paperclip, Link, Copy, Check, Settings, ShieldCheck, User as UserIcon, Mail, Phone, Palette, Dices, Save, Pencil, X, ChevronDown, RefreshCcw, Cloud, CloudOff, AlertTriangle, Trash2, Eye } from 'lucide-react';
+import { Activity, Users, GitMerge, LogOut, Cpu, Search, UserPlus, Zap, Flame, PlusCircle, LayoutDashboard, Upload, FileText, Loader2, Paperclip, Link, Copy, Check, Settings, ShieldCheck, User as UserIcon, Mail, Phone, Palette, Dices, Save, Pencil, X, ChevronDown, RefreshCcw, Cloud, CloudOff, AlertTriangle, Trash2, Eye, Shield } from 'lucide-react';
 
 interface DashboardProps {
   user: User;
@@ -36,7 +36,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
   const [aiAnalysis, setAiAnalysis] = useState<string>("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [showAddUser, setShowAddUser] = useState(false);
-  const [activeTab, setActiveTab] = useState<'network' | 'utilities' | 'settings'>('network');
+  const [activeTab, setActiveTab] = useState<'network' | 'utilities' | 'settings' | 'admin'>('network');
   const [referralLink, setReferralLink] = useState('');
   const [copied, setCopied] = useState(false);
   
@@ -73,17 +73,36 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
   const [editPhone, setEditPhone] = useState(user.phone);
   const [contactMessage, setContactMessage] = useState('');
 
+  // Admin State
+  const [allUsers, setAllUsers] = useState<User[]>([]);
+  const [adminSearch, setAdminSearch] = useState('');
+  const [expandedUser, setExpandedUser] = useState<string | null>(null);
+
   const refreshData = async () => {
     setLoadError(false);
     try {
-      const tree = await buildTree(currentUser.id);
+      // 1. Fetch fresh data (Cloud prioritized)
+      // This ensures we get the full attachments if they were stripped locally
+      const allFetchedUsers = await getUsers();
       
+      const freshMe = allFetchedUsers.find(u => u.id === currentUser.id);
+      if (freshMe) {
+          setCurrentUser(freshMe);
+      }
+
       setCloudStatus('connected'); 
       
+      // 2. Build Tree
+      const tree = await buildTree(currentUser.id);
       setTreeData(tree);
+
       const networkStats = await getNetworkStats();
       setStats(networkStats);
       setReferralLink(getReferralLink(currentUser.username));
+
+      if (activeTab === 'admin' && currentUser.username === 'admin') {
+          setAllUsers(allFetchedUsers);
+      }
     } catch (e) {
       console.error("Error refreshing data", e);
       setCloudStatus('offline');
@@ -102,7 +121,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
     setEditEmail(currentUser.email);
     setEditPhone(currentUser.phone);
     return () => clearInterval(timer);
-  }, [currentUser.id]);
+  }, [currentUser.id, activeTab]);
 
   const handleAiAnalyze = async () => {
     if (!treeData) return;
@@ -152,9 +171,9 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
 
-      // Check file size (4MB limit warning for UX)
-      if (file.size > 4 * 1024 * 1024) {
-          alert("Attenzione: Il file è molto grande (>4MB). Potrebbe non essere salvato, ma verrà comunque analizzato dall'IA.");
+      // Warning only, no longer blocking
+      if (file.size > 5 * 1024 * 1024) {
+          alert("Nota: Il file è grande (>5MB). Potrebbe richiedere più tempo per il caricamento.");
       }
 
       setSelectedFile(file);
@@ -225,8 +244,8 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
     }
   };
 
+  // User Self-Management
   const handleStatusChange = async (utilityId: string, newStatus: string) => {
-    // Optimistic UI update immediately
     const updatedUser = await updateUtilityStatus(
       currentUser.id,
       utilityId,
@@ -235,6 +254,25 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
     if (updatedUser) {
       setCurrentUser(updatedUser);
     }
+  };
+
+  // Admin Management
+  const handleAdminStatusChange = async (targetUserId: string, utilityId: string, newStatus: string) => {
+      const success = await adminUpdateUtilityStatus(targetUserId, utilityId, newStatus as Utility['status']);
+      if (success) {
+          // Refresh list locally
+          setAllUsers(prev => prev.map(u => {
+              if (u.id === targetUserId) {
+                  return {
+                      ...u,
+                      utilities: u.utilities.map(util => 
+                          util.id === utilityId ? { ...util, status: newStatus as Utility['status'] } : util
+                      )
+                  };
+              }
+              return u;
+          }));
+      }
   };
 
   const handleSaveAvatar = async () => {
@@ -315,6 +353,11 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
       );
   }
 
+  const filteredUsers = allUsers.filter(u => 
+      u.username.toLowerCase().includes(adminSearch.toLowerCase()) ||
+      u.email.toLowerCase().includes(adminSearch.toLowerCase())
+  );
+
   return (
     <div className="min-h-screen bg-black relative overflow-hidden text-slate-200">
       
@@ -387,6 +430,14 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
                             {tab === 'network' ? 'Network' : tab === 'utilities' ? 'Portafoglio' : 'Impostazioni'}
                         </button>
                     ))}
+                    {currentUser.username === 'admin' && (
+                        <button 
+                            onClick={() => setActiveTab('admin')}
+                            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all duration-300 flex items-center gap-1 ${activeTab === 'admin' ? 'bg-red-600/80 text-white shadow-lg shadow-red-500/20' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
+                        >
+                            <Shield className="w-3 h-3" /> Admin
+                        </button>
+                    )}
                 </div>
 
                 <div className="flex items-center gap-3 md:gap-4 pl-4 md:border-l border-white/10">
@@ -664,128 +715,109 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
               </div>
           )}
 
-          {activeTab === 'settings' && (
-              <div className="animate-enter max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-8">
-                  {/* Avatar Editor */}
-                  <div className="glass-card p-6 rounded-2xl border border-white/5">
-                      <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
-                          <Palette className="w-6 h-6 text-purple-400" /> Personalizza Avatar
-                      </h2>
-                      
-                      <div className="flex flex-col items-center mb-8">
-                          <div className="relative w-32 h-32 mb-4">
-                              <div className="absolute inset-0 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full blur-xl opacity-50"></div>
-                              <img src={getAvatarUrl(avatarConfig)} alt="Preview" className="relative w-32 h-32 rounded-full border-4 border-slate-800 bg-slate-800" />
-                              <button onClick={randomizeAvatar} className="absolute bottom-0 right-0 p-2 bg-white text-slate-900 rounded-full hover:bg-indigo-100 transition-colors shadow-lg">
-                                  <Dices className="w-5 h-5" />
-                              </button>
+          {activeTab === 'admin' && currentUser.username === 'admin' && (
+              <div className="animate-enter max-w-5xl mx-auto">
+                  <div className="glass-card p-6 rounded-2xl border border-white/5 mb-6">
+                      <div className="flex flex-col md:flex-row justify-between items-center gap-4 mb-6">
+                          <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                              <Shield className="w-6 h-6 text-red-500" /> Pannello Admin Master
+                          </h2>
+                          <div className="relative w-full md:w-64">
+                              <Search className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                              <input 
+                                type="text" 
+                                placeholder="Cerca utente..." 
+                                value={adminSearch}
+                                onChange={(e) => setAdminSearch(e.target.value)}
+                                className="w-full bg-slate-900/50 border border-slate-700 rounded-lg pl-10 pr-4 py-2.5 text-white focus:outline-none focus:border-red-500"
+                              />
                           </div>
                       </div>
 
                       <div className="space-y-4">
-                          <div>
-                              <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Stile</label>
-                              <div className="grid grid-cols-3 gap-2">
-                                  {AVATAR_STYLES.map(style => (
-                                      <button 
-                                        key={style.id}
-                                        onClick={() => setAvatarConfig({...avatarConfig, style: style.id})}
-                                        className={`px-2 py-2 text-xs rounded-lg border transition-all ${avatarConfig.style === style.id ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-900/50 border-slate-700 text-slate-400 hover:bg-slate-800'}`}
+                          {filteredUsers.length === 0 ? (
+                              <div className="text-center py-8 text-slate-500">Nessun utente trovato</div>
+                          ) : (
+                              filteredUsers.map(u => (
+                                  <div key={u.id} className="bg-slate-900/40 rounded-xl border border-white/5 overflow-hidden">
+                                      <div 
+                                          className="p-4 flex items-center justify-between cursor-pointer hover:bg-white/5 transition-colors"
+                                          onClick={() => setExpandedUser(expandedUser === u.id ? null : u.id)}
                                       >
-                                          {style.name}
-                                      </button>
-                                  ))}
-                              </div>
-                          </div>
-                          
-                          <div>
-                              <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Sfondo</label>
-                              <div className="flex gap-2 flex-wrap">
-                                  {BG_COLORS.map(bg => (
-                                      <button 
-                                        key={bg.id}
-                                        onClick={() => setAvatarConfig({...avatarConfig, backgroundColor: bg.id})}
-                                        className={`w-8 h-8 rounded-full border-2 transition-transform hover:scale-110 ${avatarConfig.backgroundColor === bg.id ? 'border-white scale-110 shadow-lg' : 'border-transparent'}`}
-                                        style={{backgroundColor: bg.color}}
-                                        title={bg.label}
-                                      />
-                                  ))}
-                              </div>
-                          </div>
+                                          <div className="flex items-center gap-4">
+                                              <img src={getAvatarUrl(u.avatarConfig || { style: 'bottts-neutral', seed: u.username, backgroundColor: 'transparent' })} className="w-10 h-10 rounded-full bg-slate-800" />
+                                              <div>
+                                                  <div className="font-bold text-white">{u.username} <span className="text-slate-500 text-xs font-normal">({u.id})</span></div>
+                                                  <div className="text-xs text-slate-400 flex gap-3">
+                                                      <span className="flex items-center gap-1"><Mail className="w-3 h-3"/> {u.email}</span>
+                                                      <span className="flex items-center gap-1"><Phone className="w-3 h-3"/> {u.phone}</span>
+                                                  </div>
+                                              </div>
+                                          </div>
+                                          <div className="flex items-center gap-4">
+                                              <div className="text-right">
+                                                  <div className="text-xs text-slate-500 uppercase font-bold">Utenze</div>
+                                                  <div className="text-lg font-bold text-white">{u.utilities.length}</div>
+                                              </div>
+                                              <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform ${expandedUser === u.id ? 'rotate-180' : ''}`} />
+                                          </div>
+                                      </div>
 
-                          <button 
-                            onClick={handleSaveAvatar} 
-                            className="w-full py-3 mt-4 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-bold rounded-xl shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2"
-                          >
-                            {isSavingAvatar ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                            Salva Avatar
-                          </button>
-                      </div>
-                  </div>
+                                      {expandedUser === u.id && (
+                                          <div className="p-4 bg-black/20 border-t border-white/5 space-y-3">
+                                              {u.utilities.length === 0 ? (
+                                                  <div className="text-center text-xs text-slate-600 py-2">Nessuna utenza caricata da questo utente.</div>
+                                              ) : (
+                                                  u.utilities.map(util => (
+                                                      <div key={util.id} className="flex items-center justify-between p-3 bg-slate-800/50 rounded-lg border border-white/5">
+                                                          <div className="flex items-center gap-3">
+                                                              <div className={`p-2 rounded-full ${util.type === 'Luce' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-blue-500/20 text-blue-400'}`}>
+                                                                  {util.type === 'Luce' ? <Zap className="w-4 h-4" /> : <Flame className="w-4 h-4" />}
+                                                              </div>
+                                                              <div>
+                                                                  <div className="font-bold text-white text-sm">{util.provider}</div>
+                                                                  <div className="text-[10px] text-slate-400">{new Date(util.dateAdded).toLocaleDateString()}</div>
+                                                              </div>
+                                                          </div>
+                                                          
+                                                          <div className="flex items-center gap-3">
+                                                              {/* File View */}
+                                                              {(util.attachmentData || util.attachmentName) && (
+                                                                  <button 
+                                                                      onClick={(e) => { e.stopPropagation(); setViewingUtility(util); }}
+                                                                      className="flex items-center gap-1 text-[10px] bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300"
+                                                                  >
+                                                                      <Eye className="w-3 h-3" /> Vedi Doc
+                                                                  </button>
+                                                              )}
 
-                  {/* Profile Info */}
-                  <div className="glass-card p-6 rounded-2xl border border-white/5">
-                      <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
-                          <Settings className="w-6 h-6 text-slate-400" /> Impostazioni Profilo
-                      </h2>
-                      
-                      <div className="space-y-6">
-                           <div className="p-4 bg-slate-900/50 rounded-xl border border-slate-700">
-                               <div className="text-xs text-slate-500 uppercase font-bold mb-1">Username</div>
-                               <div className="text-white font-mono text-lg">{currentUser.username}</div>
-                           </div>
-
-                           <form onSubmit={handleUpdateContact} className="space-y-4">
-                               <div>
-                                   <label className="text-xs text-slate-500 uppercase font-bold mb-1 block">Email</label>
-                                   <div className="flex gap-2">
-                                       <div className="relative flex-1">
-                                            <Mail className="absolute left-3 top-3 w-4 h-4 text-slate-500" />
-                                           <input 
-                                              type="email" 
-                                              value={editEmail} 
-                                              onChange={(e) => setEditEmail(e.target.value)}
-                                              disabled={!isEditingContact}
-                                              className={`w-full bg-slate-900/50 border rounded-lg pl-10 pr-4 py-2.5 text-white focus:outline-none ${isEditingContact ? 'border-indigo-500' : 'border-slate-700 opacity-70'}`}
-                                           />
-                                       </div>
-                                   </div>
-                               </div>
-
-                               <div>
-                                   <label className="text-xs text-slate-500 uppercase font-bold mb-1 block">Telefono</label>
-                                   <div className="flex gap-2">
-                                       <div className="relative flex-1">
-                                            <Phone className="absolute left-3 top-3 w-4 h-4 text-slate-500" />
-                                           <input 
-                                              type="tel" 
-                                              value={editPhone} 
-                                              onChange={(e) => setEditPhone(e.target.value)}
-                                              disabled={!isEditingContact}
-                                              className={`w-full bg-slate-900/50 border rounded-lg pl-10 pr-4 py-2.5 text-white focus:outline-none ${isEditingContact ? 'border-indigo-500' : 'border-slate-700 opacity-70'}`}
-                                           />
-                                       </div>
-                                   </div>
-                               </div>
-
-                               <div className="pt-2">
-                                   {!isEditingContact ? (
-                                       <button type="button" onClick={() => setIsEditingContact(true)} className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-lg transition-colors flex items-center justify-center gap-2">
-                                           <Pencil className="w-4 h-4" /> Modifica Contatti
-                                       </button>
-                                   ) : (
-                                       <div className="flex gap-2">
-                                            <button type="button" onClick={() => { setIsEditingContact(false); setEditEmail(currentUser.email); setEditPhone(currentUser.phone); }} className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-lg transition-colors">
-                                                Annulla
-                                            </button>
-                                            <button type="submit" className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg transition-colors">
-                                                Salva
-                                            </button>
-                                       </div>
-                                   )}
-                                   {contactMessage && <div className="mt-2 text-center text-xs text-emerald-400 font-bold">{contactMessage}</div>}
-                               </div>
-                           </form>
+                                                              <div className="flex items-center gap-1">
+                                                                  {util.status === 'In Lavorazione' ? (
+                                                                      <>
+                                                                          <button onClick={() => handleAdminStatusChange(u.id, util.id, 'Attiva')} className="p-1.5 bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500 hover:text-white rounded-md transition-colors" title="Approva">
+                                                                              <Check className="w-4 h-4" />
+                                                                          </button>
+                                                                          <button onClick={() => handleAdminStatusChange(u.id, util.id, 'Rifiutata')} className="p-1.5 bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white rounded-md transition-colors" title="Rifiuta">
+                                                                              <X className="w-4 h-4" />
+                                                                          </button>
+                                                                      </>
+                                                                  ) : (
+                                                                      <span className={`text-[10px] font-bold px-2 py-1 rounded border ${
+                                                                          util.status === 'Attiva' ? 'border-emerald-500/30 text-emerald-400' : 'border-red-500/30 text-red-400'
+                                                                      }`}>
+                                                                          {util.status}
+                                                                      </span>
+                                                                  )}
+                                                              </div>
+                                                          </div>
+                                                      </div>
+                                                  ))
+                                              )}
+                                          </div>
+                                      )}
+                                  </div>
+                              ))
+                          )}
                       </div>
                   </div>
               </div>
