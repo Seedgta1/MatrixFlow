@@ -15,12 +15,11 @@ const isGsConfigured = () => !GOOGLE_SCRIPT_URL.includes('INSERISCI_QUI');
 // --- LOCAL STORAGE HELPERS (SAFE MODE) ---
 
 // Helper cruciale: Rimuove i dati pesanti (immagini) prima di salvare nel LocalStorage
-// per evitare il crash "QuotaExceededError". In memoria l'app userà i dati completi.
 const sanitizeForStorage = (user: User): User => ({
   ...user,
   utilities: user.utilities.map(u => ({
     ...u,
-    // Se l'allegato supera i 50KB, non lo salviamo in locale (resta nel Cloud)
+    // Se l'allegato supera i 50KB, non lo salviamo in locale
     attachmentData: (u.attachmentData && u.attachmentData.length < 50000) 
         ? u.attachmentData 
         : undefined
@@ -143,28 +142,28 @@ export const getUsers = async (): Promise<User[]> => {
               return false;
           });
 
-          // Uniamo i dati: Cloud (che potrebbe avere immagini pesanti) + Locali pendenti
           const mergedData = [...normalizedCloudUsers, ...pendingUsers];
-          
-          // Salviamo in locale la versione "lite" (senza immagini pesanti)
           saveLocalUsers(mergedData);
-          
-          // Ma ritorniamo all'app la versione "full" (con immagini dal cloud)
           return mergedData;
       }
       
       console.warn("Cloud non disponibile o formato non valido, uso dati locali.");
   }
 
-  // 2. Supabase
-  if (DB_MODE === 'SUPABASE' && isDbConfigured()) {
-    const { data, error } = await supabase.from('users').select(`*, utilities(*)`);
-    if (!error && data) return data as any;
-  }
-
-  // 3. Local Fallback
+  // 2. Local Fallback
   await new Promise(r => setTimeout(r, 50)); 
   return getLocalUsers();
+};
+
+// NEW: Fetches the image content for a specific utility only when needed
+export const fetchUtilityAttachment = async (utilityId: string): Promise<string | null> => {
+    if (DB_MODE === 'GOOGLE_SHEETS' && isGsConfigured()) {
+        const response = await googleSheetsClient.post('getUtilityImage', { utilityId });
+        if (response && response.success && response.attachmentData) {
+            return response.attachmentData;
+        }
+    }
+    return null;
 };
 
 const findPlacementParent = (users: User[], rootSponsorId: string): string => {
@@ -244,19 +243,6 @@ export const registerUser = async (
           return { success: true, message: 'Registrazione completata (Offline mode).', user: newUser };
       }
       
-  } else if (DB_MODE === 'SUPABASE' && isDbConfigured()) {
-      const { error } = await supabase.from('users').insert([{
-          id: newUser.id,
-          username: newUser.username,
-          password: newUser.password,
-          email: cleanEmail,
-          phone: cleanPhone,
-          sponsor_id: newUser.sponsorId,
-          parent_id: newUser.parentId,
-          level: newUser.level,
-          avatar_config: newUser.avatarConfig
-      }]);
-      if (error) return { success: false, message: 'Errore Database: ' + error.message };
   } else {
       users.push(newUser);
       saveLocalUsers(users);
@@ -318,25 +304,18 @@ export const addUtility = async (
   };
 
   if (DB_MODE === 'GOOGLE_SHEETS' && isGsConfigured()) {
-      // 1. Inviamo TUTTI i dati al Cloud (Google Scripts gestirà eventuali limiti o Drive)
-      // NON blocchiamo l'upload qui.
       googleSheetsClient.post('addUtility', { ...newUtility, userId })
           .catch(err => console.error("Cloud save failed (Utility)", err));
       
       const currentUser = getCurrentUser();
-      // Cerchiamo di recuperare l'utente anche se getCurrentUser (da storage) è lite
-      // Ma per l'update immediato usiamo quello che abbiamo
       if (currentUser && currentUser.id === userId) {
           const updatedUser = { ...currentUser, utilities: [...(currentUser.utilities || []), newUtility] };
           
-          // 2. Aggiorniamo la sessione (Memoria + Storage Lite)
           updateLocalSession(updatedUser);
           
-          // 3. Aggiorniamo la lista utenti locale (Storage Lite)
           const localUsers = getLocalUsers();
           const idx = localUsers.findIndex(u => u.id === userId);
           if (idx !== -1) {
-             // Dobbiamo assicurarci di avere la struttura corretta
              const userToSave = { ...localUsers[idx], utilities: [...localUsers[idx].utilities, newUtility] };
              localUsers[idx] = userToSave;
              saveLocalUsers(localUsers);
@@ -346,8 +325,6 @@ export const addUtility = async (
       return null;
   }
   
-  // Local Fallback (Offline puro)
-  // Qui dobbiamo fare attenzione se il file è enorme >5MB crasha tutto.
   if (attachmentData && attachmentData.length > 2 * 1024 * 1024) {
       console.warn("File troppo grande per modalità offline. Salvataggio metadati only.");
       newUtility.attachmentData = undefined;
@@ -379,7 +356,6 @@ export const updateUtilityStatus = async (
             updateLocalSession(updatedUser);
             
             if (DB_MODE === 'GOOGLE_SHEETS' && isGsConfigured()) {
-                 // Ora usiamo l'endpoint specifico
                  googleSheetsClient.post('updateUtilityStatus', { 
                      userId, 
                      utilityId, 
@@ -420,7 +396,6 @@ export const adminUpdateUtilityStatus = async (
 
   if (DB_MODE === 'GOOGLE_SHEETS' && isGsConfigured()) {
       try {
-           // Richiamiamo l'endpoint dedicato che il nuovo script supporterà
           const response = await googleSheetsClient.post('updateUtilityStatus', { 
                userId: targetUserId, 
                utilityId, 
@@ -431,14 +406,12 @@ export const adminUpdateUtilityStatus = async (
                console.error("Cloud Error updating status:", response.error);
                return false;
            }
-           
            return true;
       } catch (err) {
           console.error("Failed to sync utility status (Admin)", err);
           return false;
       }
   }
-  
   return true;
 };
 
@@ -447,7 +420,6 @@ export const loginUser = async (username: string, password: string): Promise<Use
   const safePassword = password.trim();
 
   // 1. Fetch Utenti (Smart: Cloud + Merge Local Pending)
-  // Questo scarica le immagini dal cloud se presenti
   const users = await getUsers();
   
   const user = users.find(u => 
@@ -456,22 +428,19 @@ export const loginUser = async (username: string, password: string): Promise<Use
   );
   
   if (user) {
-    // Salviamo in sessione (versione lite) ma ritorniamo full in memoria
     updateLocalSession(user);
     return user;
   }
 
-  // 3. EXTREME FALLBACK
-  if (DB_MODE === 'GOOGLE_SHEETS') {
-      const localUsers = getLocalUsers();
-      const localUser = localUsers.find(u => 
-          String(u.username).toLowerCase() === safeUsername && 
-          String(u.password) === safePassword
-      );
-      if (localUser) {
-          updateLocalSession(localUser);
-          return localUser;
-      }
+  // Fallback Locale
+  const localUsers = getLocalUsers();
+  const localUser = localUsers.find(u => 
+      String(u.username).toLowerCase() === safeUsername && 
+      String(u.password) === safePassword
+  );
+  if (localUser) {
+      updateLocalSession(localUser);
+      return localUser;
   }
 
   return null;

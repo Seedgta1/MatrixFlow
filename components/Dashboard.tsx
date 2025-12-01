@@ -1,7 +1,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { User, MatrixNode, UtilityType, AvatarConfig, Utility } from '../types';
-import { buildTree, logoutUser, registerUser, getNetworkStats, addUtility, getReferralLink, updateUser, updateUtilityStatus, getUsers, adminUpdateUtilityStatus } from '../services/matrixService';
+import { buildTree, logoutUser, registerUser, getNetworkStats, addUtility, getReferralLink, updateUser, updateUtilityStatus, getUsers, adminUpdateUtilityStatus, fetchUtilityAttachment } from '../services/matrixService';
 import { analyzeNetwork, extractBillData } from '../services/geminiService';
 import TreeVisualizer from './TreeVisualizer';
 import MatrixBackground from './MatrixBackground';
@@ -19,15 +19,6 @@ const AVATAR_STYLES = [
   { id: 'adventurer', name: 'Adventurer' },
   { id: 'fun-emoji', name: 'Emoji' },
   { id: 'lorelei', name: 'Artistic' }
-];
-
-const BG_COLORS = [
-  { id: 'transparent', color: 'transparent', label: 'None' },
-  { id: 'b6e3f4', color: '#b6e3f4', label: 'Blue' },
-  { id: 'c0aede', color: '#c0aede', label: 'Purple' },
-  { id: 'd1d4f9', color: '#d1d4f9', label: 'Indigo' },
-  { id: 'ffd5dc', color: '#ffd5dc', label: 'Pink' },
-  { id: 'ffdfbf', color: '#ffdfbf', label: 'Orange' },
 ];
 
 const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
@@ -56,6 +47,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
 
   // Modal View Utility
   const [viewingUtility, setViewingUtility] = useState<Utility | null>(null);
+  const [isDownloadingImage, setIsDownloadingImage] = useState(false);
 
   const [currentUser, setCurrentUser] = useState<User>(user);
   const [isLoadingData, setIsLoadingData] = useState(true);
@@ -81,8 +73,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
   const refreshData = async () => {
     setLoadError(false);
     try {
-      // 1. Fetch fresh data (Cloud prioritized)
-      // This ensures we get the full attachments if they were stripped locally
       const allFetchedUsers = await getUsers();
       
       const freshMe = allFetchedUsers.find(u => u.id === currentUser.id);
@@ -92,7 +82,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
 
       setCloudStatus('connected'); 
       
-      // 2. Build Tree
       const tree = await buildTree(currentUser.id);
       setTreeData(tree);
 
@@ -170,12 +159,9 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
-
-      // Warning only, no longer blocking
       if (file.size > 5 * 1024 * 1024) {
           alert("Nota: Il file è grande (>5MB). Potrebbe richiedere più tempo per il caricamento.");
       }
-
       setSelectedFile(file);
       setIsProcessingFile(true);
       setUtilMessage("Analisi documento con Gemini AI in corso...");
@@ -184,10 +170,8 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
       reader.onload = async () => {
         try {
             const base64String = (reader.result as string).split(',')[1];
-            setFilePreview(reader.result as string); // Save preview for UI
-
+            setFilePreview(reader.result as string); 
             const result = await extractBillData(base64String, file.type);
-            
             if (result.error) {
                setUtilMessage("Analisi fallita: inserisci i dati manualmente.");
             } else {
@@ -225,7 +209,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
             utilProvider, 
             selectedFile?.name, 
             selectedFile?.type,
-            filePreview || undefined // Pass the base64 data to store
+            filePreview || undefined 
         );
 
         if (updatedUser) {
@@ -244,7 +228,39 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
     }
   };
 
-  // User Self-Management
+  // Improved View Utility logic with Lazy Loading
+  const handleViewUtility = async (util: Utility) => {
+      setViewingUtility(util);
+      
+      // If we don't have the image data yet (but we have a filename), fetch it
+      if (!util.attachmentData && util.attachmentName) {
+          setIsDownloadingImage(true);
+          try {
+              const data = await fetchUtilityAttachment(util.id);
+              if (data) {
+                  // Update the local state for this utility so we don't fetch again
+                  const updatedUtil = { ...util, attachmentData: data };
+                  setViewingUtility(updatedUtil);
+                  
+                  // Optionally update it in the main lists to cache it in memory
+                  if (activeTab === 'admin') {
+                       setAllUsers(prev => prev.map(u => ({
+                           ...u,
+                           utilities: u.utilities.map(ut => ut.id === util.id ? updatedUtil : ut)
+                       })));
+                  } else {
+                       const newUtils = currentUser.utilities.map(ut => ut.id === util.id ? updatedUtil : ut);
+                       setCurrentUser({ ...currentUser, utilities: newUtils });
+                  }
+              }
+          } catch (e) {
+              console.error("Failed to download image", e);
+          } finally {
+              setIsDownloadingImage(false);
+          }
+      }
+  };
+
   const handleStatusChange = async (utilityId: string, newStatus: string) => {
     const updatedUser = await updateUtilityStatus(
       currentUser.id,
@@ -256,11 +272,9 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
     }
   };
 
-  // Admin Management
   const handleAdminStatusChange = async (targetUserId: string, utilityId: string, newStatus: string) => {
       const success = await adminUpdateUtilityStatus(targetUserId, utilityId, newStatus as Utility['status']);
       if (success) {
-          // Refresh list locally
           setAllUsers(prev => prev.map(u => {
               if (u.id === targetUserId) {
                   return {
@@ -326,7 +340,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
                   <Loader2 className="w-10 h-10 animate-spin text-indigo-500" />
                   <div className="text-center">
                     <p className="text-sm font-bold text-white mb-1">Connessione Matrix in corso...</p>
-                    <p className="text-xs text-slate-500">Sincronizzazione dati cloud</p>
+                    <p className="text-xs text-slate-500">Sincronizzazione rapida dati</p>
                   </div>
                   
                   {loadingTimer > 8 && (
@@ -376,7 +390,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between h-16">
               <div className="flex items-center gap-3">
-                {/* Small Animated Logo - Clickable to Home */}
                 <button 
                    onClick={() => setActiveTab('network')}
                    className="w-10 h-10 relative cursor-pointer hover:scale-105 transition-transform"
@@ -397,12 +410,10 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
                       </g>
                    </svg>
                 </button>
-                {/* Hide Text on small mobile to save space */}
                 <span className="hidden sm:block text-lg md:text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">
                   MatrixFlow
                 </span>
                 
-                {/* Cloud Status Indicator */}
                 <div className="flex items-center gap-1.5 px-2 py-1 bg-white/5 rounded-full border border-white/5 ml-2">
                     {cloudStatus === 'connected' ? (
                         <>
@@ -419,7 +430,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
 
               </div>
               <div className="flex items-center gap-4 md:gap-6">
-                {/* Desktop Tabs */}
                 <div className="hidden md:flex gap-1 bg-white/5 p-1 rounded-lg border border-white/5">
                     {['network', 'utilities', 'settings'].map((tab) => (
                         <button 
@@ -466,7 +476,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
           {/* TABS CONTENT */}
           {activeTab === 'network' && (
              <div className="space-y-6 animate-enter">
-                {/* Stats Row */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                    <div className="glass-card p-5 rounded-2xl flex items-center gap-4 border border-white/5">
                       <div className="p-3 bg-indigo-500/20 rounded-xl text-indigo-400">
@@ -497,7 +506,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
                    </div>
                 </div>
 
-                {/* AI Analysis & Actions */}
                 <div className="flex flex-col md:flex-row gap-4">
                    <div className="flex-1 glass-card p-6 rounded-2xl border border-white/5 relative overflow-hidden">
                       <div className="absolute top-0 right-0 p-3 opacity-10">
@@ -539,7 +547,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
                    </div>
                 </div>
                 
-                {/* Add User Form (Collapsible) */}
                 {showAddUser && (
                     <div className="glass-card p-6 rounded-2xl border border-white/5 animate-enter">
                         <h3 className="text-lg font-bold text-white mb-4">Registrazione Manuale</h3>
@@ -558,7 +565,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
                     </div>
                 )}
 
-                {/* Tree Visualization */}
                 <div className="h-[600px] w-full">
                     {treeData && <TreeVisualizer data={treeData} />}
                 </div>
@@ -567,7 +573,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
 
           {activeTab === 'utilities' && (
               <div className="animate-enter max-w-4xl mx-auto space-y-6">
-                 {/* Add Utility */}
                  <div className="glass-card p-6 rounded-2xl border border-white/5">
                     <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
                         <PlusCircle className="w-6 h-6 text-indigo-400" /> Aggiungi Utenza
@@ -591,7 +596,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
                                     </div>
                                 ) : (
                                     <div className="relative h-40 bg-slate-900 rounded-xl overflow-hidden border border-slate-700 group">
-                                        {/* Preview Image or Icon */}
                                         {selectedFile?.type.includes('image') ? (
                                             <img src={filePreview} alt="Preview" className="w-full h-full object-cover opacity-80" />
                                         ) : (
@@ -601,7 +605,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
                                             </div>
                                         )}
                                         
-                                        {/* Overlay Actions */}
                                         <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                                              <button onClick={clearUpload} className="bg-red-500/80 hover:bg-red-500 text-white p-2 rounded-full mb-2">
                                                  <X className="w-5 h-5" />
@@ -609,7 +612,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
                                              <span className="text-xs font-bold text-white">Rimuovi File</span>
                                         </div>
 
-                                        {/* Loading Overlay */}
                                         {isProcessingFile && (
                                             <div className="absolute inset-0 bg-indigo-900/80 flex flex-col items-center justify-center z-20">
                                                 <Loader2 className="w-8 h-8 animate-spin text-white mb-2" />
@@ -652,7 +654,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
                     </div>
                  </div>
 
-                 {/* List Utilities */}
                  <div className="grid grid-cols-1 gap-4">
                     {currentUser.utilities.length === 0 ? (
                         <div className="text-center p-10 text-slate-500 border border-dashed border-slate-700 rounded-xl">
@@ -680,10 +681,9 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
                                 </div>
                                 <div className="flex flex-col items-end gap-2">
                                     <div className="flex items-center gap-2">
-                                        {/* View Attachment Button */}
                                         {(util.attachmentData || util.attachmentName) && (
                                             <button 
-                                                onClick={() => setViewingUtility(util)}
+                                                onClick={() => handleViewUtility(util)}
                                                 className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
                                                 title="Vedi Bolletta"
                                             >
@@ -700,7 +700,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
                                         </span>
                                     </div>
                                     
-                                    {/* Admin Action Only */}
                                     {currentUser.username === 'admin' && util.status === 'In Lavorazione' && (
                                         <div className="flex gap-1 animate-enter">
                                             <button onClick={() => handleStatusChange(util.id, 'Attiva')} className="p-1 hover:bg-emerald-500/20 rounded text-emerald-500"><Check className="w-4 h-4"/></button>
@@ -781,10 +780,9 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
                                                           </div>
                                                           
                                                           <div className="flex items-center gap-3">
-                                                              {/* File View */}
                                                               {(util.attachmentData || util.attachmentName) && (
                                                                   <button 
-                                                                      onClick={(e) => { e.stopPropagation(); setViewingUtility(util); }}
+                                                                      onClick={(e) => { e.stopPropagation(); handleViewUtility(util); }}
                                                                       className="flex items-center gap-1 text-[10px] bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-300"
                                                                   >
                                                                       <Eye className="w-3 h-3" /> Vedi Doc
@@ -825,7 +823,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
 
           {activeTab === 'settings' && (
               <div className="animate-enter max-w-2xl mx-auto space-y-6">
-                  {/* Profile & Avatar */}
                   <div className="glass-card p-6 rounded-2xl border border-white/5">
                       <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
                           <UserIcon className="w-6 h-6 text-indigo-400" /> Profilo & Avatar
@@ -864,7 +861,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
                       </div>
                   </div>
 
-                  {/* Contacts */}
                   <div className="glass-card p-6 rounded-2xl border border-white/5">
                       <div className="flex justify-between items-center mb-4">
                           <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -905,7 +901,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
                       {contactMessage && <div className="mt-3 text-center text-xs text-emerald-400 font-bold">{contactMessage}</div>}
                   </div>
 
-                  {/* Danger Zone */}
                   <div className="glass-card p-6 rounded-2xl border border-red-900/30 bg-red-950/10">
                       <h3 className="text-lg font-bold text-red-400 mb-4 flex items-center gap-2">
                           <AlertTriangle className="w-5 h-5" /> Zona Pericolo
@@ -918,7 +913,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
               </div>
           )}
 
-          {/* Utility Viewer Modal */}
           {viewingUtility && (
               <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-enter">
                   <div className="bg-slate-900 rounded-2xl max-w-lg w-full max-h-[90vh] flex flex-col border border-white/10 shadow-2xl">
@@ -932,8 +926,14 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
                           </button>
                       </div>
                       
-                      <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-black/50">
-                          {viewingUtility.attachmentData ? (
+                      <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-black/50 min-h-[300px]">
+                          {isDownloadingImage ? (
+                              <div className="text-center">
+                                  <Loader2 className="w-10 h-10 text-indigo-500 animate-spin mx-auto mb-3" />
+                                  <p className="text-sm text-white font-bold">Scaricamento documento...</p>
+                                  <p className="text-xs text-slate-500">Recupero dal database sicuro</p>
+                              </div>
+                          ) : viewingUtility.attachmentData ? (
                               viewingUtility.attachmentType?.includes('image') ? (
                                   <img src={viewingUtility.attachmentData} alt="Bill" className="max-w-full rounded-lg shadow-lg" />
                               ) : (
@@ -942,7 +942,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
                           ) : (
                               <div className="text-center py-10 text-slate-500">
                                   <AlertTriangle className="w-10 h-10 mx-auto mb-2 opacity-50" />
-                                  Anteprima non disponibile (File troppo grande o rimosso).
+                                  Anteprima non disponibile (File mancante o rimosso).
                               </div>
                           )}
                       </div>
@@ -952,49 +952,50 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
 
         </main>
         
-        {/* Mobile Bottom Navigation */}
-        <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-black/90 backdrop-blur-xl border-t border-white/10 safe-area-bottom">
+        <div className="md:hidden fixed bottom-0 left-0 right-0 z-[9999] bg-black/80 backdrop-blur-xl border-t border-white/10 safe-area-bottom shadow-[0_-5px_20px_rgba(0,0,0,0.5)]">
+            <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-indigo-500/50 to-transparent"></div>
+            
             <div className="flex justify-around items-center h-16 px-2">
                 <button 
                     onClick={() => setActiveTab('network')}
-                    className={`flex flex-col items-center justify-center w-full h-full gap-1 ${activeTab === 'network' ? 'text-indigo-400' : 'text-slate-500 hover:text-slate-300'}`}
+                    className={`group flex flex-col items-center justify-center w-full h-full gap-1 transition-all duration-300 ${activeTab === 'network' ? 'text-indigo-400' : 'text-slate-500'}`}
                 >
-                    <div className={`p-1 rounded-full ${activeTab === 'network' ? 'bg-indigo-500/20' : ''}`}>
+                    <div className={`p-1.5 rounded-full transition-all duration-300 ${activeTab === 'network' ? 'bg-indigo-500/20 scale-110 shadow-[0_0_10px_rgba(99,102,241,0.3)]' : 'group-hover:bg-white/5'}`}>
                         <LayoutDashboard className="w-5 h-5" />
                     </div>
-                    <span className="text-[10px] font-medium">Network</span>
+                    <span className={`text-[10px] font-medium transition-all ${activeTab === 'network' ? 'text-white scale-105' : ''}`}>Network</span>
                 </button>
 
                 <button 
                     onClick={() => setActiveTab('utilities')}
-                    className={`flex flex-col items-center justify-center w-full h-full gap-1 ${activeTab === 'utilities' ? 'text-indigo-400' : 'text-slate-500 hover:text-slate-300'}`}
+                    className={`group flex flex-col items-center justify-center w-full h-full gap-1 transition-all duration-300 ${activeTab === 'utilities' ? 'text-indigo-400' : 'text-slate-500'}`}
                 >
-                     <div className={`p-1 rounded-full ${activeTab === 'utilities' ? 'bg-indigo-500/20' : ''}`}>
+                     <div className={`p-1.5 rounded-full transition-all duration-300 ${activeTab === 'utilities' ? 'bg-indigo-500/20 scale-110 shadow-[0_0_10px_rgba(99,102,241,0.3)]' : 'group-hover:bg-white/5'}`}>
                         <FileText className="w-5 h-5" />
                     </div>
-                    <span className="text-[10px] font-medium">Utenze</span>
+                    <span className={`text-[10px] font-medium transition-all ${activeTab === 'utilities' ? 'text-white scale-105' : ''}`}>Utenze</span>
                 </button>
 
                 {currentUser.username === 'admin' && (
                     <button 
                         onClick={() => setActiveTab('admin')}
-                        className={`flex flex-col items-center justify-center w-full h-full gap-1 ${activeTab === 'admin' ? 'text-red-400' : 'text-slate-500 hover:text-slate-300'}`}
+                        className={`group flex flex-col items-center justify-center w-full h-full gap-1 transition-all duration-300 ${activeTab === 'admin' ? 'text-red-400' : 'text-slate-500'}`}
                     >
-                         <div className={`p-1 rounded-full ${activeTab === 'admin' ? 'bg-red-500/20' : ''}`}>
+                         <div className={`p-1.5 rounded-full transition-all duration-300 ${activeTab === 'admin' ? 'bg-red-500/20 scale-110 shadow-[0_0_10px_rgba(239,68,68,0.3)]' : 'group-hover:bg-white/5'}`}>
                             <Shield className="w-5 h-5" />
                         </div>
-                        <span className="text-[10px] font-medium">Admin</span>
+                        <span className={`text-[10px] font-medium transition-all ${activeTab === 'admin' ? 'text-white scale-105' : ''}`}>Admin</span>
                     </button>
                 )}
 
                 <button 
                     onClick={() => setActiveTab('settings')}
-                    className={`flex flex-col items-center justify-center w-full h-full gap-1 ${activeTab === 'settings' ? 'text-indigo-400' : 'text-slate-500 hover:text-slate-300'}`}
+                    className={`group flex flex-col items-center justify-center w-full h-full gap-1 transition-all duration-300 ${activeTab === 'settings' ? 'text-indigo-400' : 'text-slate-500'}`}
                 >
-                     <div className={`p-1 rounded-full ${activeTab === 'settings' ? 'bg-indigo-500/20' : ''}`}>
+                     <div className={`p-1.5 rounded-full transition-all duration-300 ${activeTab === 'settings' ? 'bg-indigo-500/20 scale-110 shadow-[0_0_10px_rgba(99,102,241,0.3)]' : 'group-hover:bg-white/5'}`}>
                         <Settings className="w-5 h-5" />
                     </div>
-                    <span className="text-[10px] font-medium">Opzioni</span>
+                    <span className={`text-[10px] font-medium transition-all ${activeTab === 'settings' ? 'text-white scale-105' : ''}`}>Opzioni</span>
                 </button>
             </div>
         </div>
